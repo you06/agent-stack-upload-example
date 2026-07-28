@@ -183,7 +183,7 @@ export async function uploadInlineFile({
   }
 
   const requestKey =
-    idempotencyKey ?? stableIdempotencyKey('inline', metadata);
+    idempotencyKey ?? currentTimestampIdempotencyKey('inline');
   const { upload } = await client.createUpload({
     idempotencyKey: requestKey,
     ...metadata,
@@ -230,7 +230,7 @@ export async function uploadMultipartFile({
   }
 
   const requestKey =
-    idempotencyKey ?? stableIdempotencyKey('multipart', metadata);
+    idempotencyKey ?? currentTimestampIdempotencyKey('multipart');
   const { upload } = await client.createUpload({
     idempotencyKey: requestKey,
     ...metadata,
@@ -317,18 +317,8 @@ export function rfc9530Sha256(sha256) {
   return `sha-256=:${Buffer.from(sha256, 'hex').toString('base64')}:`;
 }
 
-export function stableIdempotencyKey(mode, metadata) {
-  const requestHash = sha256Hex(
-    Buffer.from(
-      JSON.stringify([
-        metadata.originalName,
-        metadata.byteSize,
-        metadata.sha256,
-        metadata.contentType,
-      ]),
-    ),
-  );
-  return `agent9-example-${mode}-${requestHash.slice(0, 32)}`;
+export function currentTimestampIdempotencyKey(mode, now = Date.now()) {
+  return `agent-stack-${mode}-${now}`;
 }
 
 async function fileMetadata(filePath, contentType) {

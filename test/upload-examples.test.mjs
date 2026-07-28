@@ -97,7 +97,10 @@ test('inline example creates an intent, sends RFC 9530 digest, and checks status
   assert.equal(requests.length, 4);
   assert.equal(requests[1].headers.get('authorization'), 'Bearer test-user-key');
   assert.equal(requests[1].headers.get('x-agent9-project-id'), 'project-test');
-  assert.match(requests[1].headers.get('idempotency-key'), /^agent9-example-inline-/u);
+  assert.match(
+    requests[1].headers.get('idempotency-key'),
+    /^agent-stack-inline-\d{13}$/u,
+  );
   assert.deepEqual(JSON.parse(requests[1].body.toString()), {
     originalName: 'inline.txt',
     byteSize: bytes.length,

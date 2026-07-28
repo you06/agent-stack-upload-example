@@ -20,19 +20,18 @@ Session cookies and workspace API keys are intentionally rejected by this public
 Export the required variables:
 
 ```bash
-export AGENT9_BASE_URL='https://your-agent9-host.example'
-export AGENT9_USER_API_KEY='ag9_uak_replace_me'
-export AGENT9_PROJECT_ID='your-project-id'
+export AGENT_STACK_BASE_URL='https://your-agent9-host.example'
+export AGENT_STACK_USER_API_KEY='ag9_uak_replace_me'
+export AGENT_STACK_PROJECT_ID='your-project-id'
 ```
 
 Optional variables:
 
 ```bash
 export CONTENT_TYPE='application/pdf'
-export AGENT9_IDEMPOTENCY_KEY='customer-upload-2026-07-28-001'
 ```
 
-When `AGENT9_IDEMPOTENCY_KEY` is omitted, the examples derive a stable key from the file name, size, whole-file SHA-256, and content type. Re-running the same command therefore replays the same upload intent. Do not reuse an explicit key with different upload metadata.
+Each example creates its `Idempotency-Key` from the current millisecond timestamp when the process starts. The same key is reused throughout that upload attempt. Starting the command again creates a new upload intent.
 
 The examples never print the API key.
 
@@ -99,8 +98,8 @@ For a one-part S3 upload the server can report `checksumVerification: "whole"`. 
 
 ## Retry and recovery
 
-- Retry `POST /uploads` with the **same** `Idempotency-Key` and exact metadata to replay the durable intent.
-- Re-running the multipart example safely replays the intent and uploads the parts again. This is simple and does not require a local checkpoint file.
+- Retry `POST /uploads` within the same process with the same timestamp-based `Idempotency-Key` and exact metadata to replay the durable intent.
+- Starting the command again generates a new timestamp and therefore creates a new upload intent.
 - `GET /uploads/{uploadId}` returns the durable intent and file state.
 - `DELETE /uploads/{uploadId}` abandons the intent and aborts remote multipart state when present.
 - A `409` means the idempotency key was reused with different input or an operation is already in progress.
@@ -119,9 +118,9 @@ import {
 } from './src/agent9-user-files.mjs';
 
 const client = new Agent9UserFilesClient({
-  baseUrl: process.env.AGENT9_BASE_URL,
-  apiKey: process.env.AGENT9_USER_API_KEY,
-  projectId: process.env.AGENT9_PROJECT_ID,
+  baseUrl: process.env.AGENT_STACK_BASE_URL,
+  apiKey: process.env.AGENT_STACK_USER_API_KEY,
+  projectId: process.env.AGENT_STACK_PROJECT_ID,
 });
 
 const result = await uploadInlineFile({
