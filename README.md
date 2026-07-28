@@ -36,7 +36,8 @@ When `AGENT_STACK_SESSION_ID` is omitted, the example creates a new session. Whe
 it is set, the example reuses that session. In both cases, the uploaded
 `userFileId` is attached to a new Turn with the prompt `看一下这个文件的内容`
 ("Look at the contents of this file"). The Session and Turn are visible in the
-web console.
+web console. When reusing a Session, the user bound to the API key must own or
+participate in that Session; otherwise the API returns `session_not_found`.
 
 Each example creates its `Idempotency-Key` from the current millisecond timestamp when the process starts. The same key is reused throughout that upload attempt. Starting the command again creates a new upload intent.
 
