@@ -4,17 +4,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import {
-  Agent9UserFilesClient,
+  AgentStackUserFilesClient,
   rfc9530Sha256,
   sha256Hex,
   uploadInlineFile,
   uploadMultipartFile,
-} from '../src/agent9-user-files.mjs';
+} from '../src/agent-stack-user-files.mjs';
 
 let root;
 
 before(async () => {
-  root = await mkdtemp(join(tmpdir(), 'agent9-upload-example-'));
+  root = await mkdtemp(join(tmpdir(), 'agent-stack-upload-example-'));
 });
 
 after(async () => {
@@ -229,8 +229,8 @@ test('multipart example binds each digest, sends exact S3 headers, and completes
 });
 
 function testClient(fetchImpl) {
-  return new Agent9UserFilesClient({
-    baseUrl: 'https://agent9.example',
+  return new AgentStackUserFilesClient({
+    baseUrl: 'https://agent-stack.example',
     apiKey: 'test-user-key',
     projectId: 'project-test',
     fetchImpl,

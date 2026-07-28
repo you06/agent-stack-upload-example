@@ -1,16 +1,16 @@
-# Agent9 public 2-path upload examples
+# Agent Stack public 2-path upload examples
 
-Dependency-free Node.js examples for the public Agent9 user-file upload API:
+Dependency-free Node.js examples for the public Agent Stack user-file upload API:
 
-- **Inline path:** the client sends the complete file to Agent9. Agent9 verifies the whole-file SHA-256.
-- **Multipart path:** Agent9 returns checksum-bound presigned URLs. The client sends each part directly to S3, then asks Agent9 to complete the upload.
+- **Inline path:** the client sends the complete file to Agent Stack. Agent Stack verifies the whole-file SHA-256.
+- **Multipart path:** Agent Stack returns checksum-bound presigned URLs. The client sends each part directly to S3, then asks Agent Stack to complete the upload.
 
 The server chooses the path from the current `inlineThreshold`. Do not hard-code that threshold: both examples read `GET /api/user-files/upload-capabilities` first.
 
 ## Requirements
 
 - Node.js 20 or newer
-- An Agent9 **user API key** (`ag9_uak...`)
+- An Agent Stack **user API key** (`ag9_uak...`)
 - A project id in the API key's workspace
 
 Session cookies and workspace API keys are intentionally rejected by this public API.
@@ -20,7 +20,7 @@ Session cookies and workspace API keys are intentionally rejected by this public
 Export the required variables:
 
 ```bash
-export AGENT_STACK_BASE_URL='https://your-agent9-host.example'
+export AGENT_STACK_BASE_URL='https://your-agent-stack-host.example'
 export AGENT_STACK_USER_API_KEY='ag9_uak_replace_me'
 export AGENT_STACK_PROJECT_ID='your-project-id'
 ```
@@ -106,18 +106,18 @@ For a one-part S3 upload the server can report `checksumVerification: "whole"`. 
 - A typed `503` means durable state or Drive9 is temporarily unavailable. Preserve the idempotency key and retry.
 - After a typed `413`, read capabilities again before changing the plan.
 
-The examples throw `Agent9ApiError` with `status`, `code`, `details`, and the parsed error payload so applications can implement their own retry policy.
+The examples throw `AgentStackApiError` with `status`, `code`, `details`, and the parsed error payload so applications can implement their own retry policy.
 
 ## Use as a library
 
 ```js
 import {
-  Agent9UserFilesClient,
+  AgentStackUserFilesClient,
   uploadInlineFile,
   uploadMultipartFile,
-} from './src/agent9-user-files.mjs';
+} from './src/agent-stack-user-files.mjs';
 
-const client = new Agent9UserFilesClient({
+const client = new AgentStackUserFilesClient({
   baseUrl: process.env.AGENT_STACK_BASE_URL,
   apiKey: process.env.AGENT_STACK_USER_API_KEY,
   projectId: process.env.AGENT_STACK_PROJECT_ID,
@@ -146,4 +146,4 @@ The tests verify authentication headers, request metadata, RFC 9530 digest forma
 
 ## Contract source
 
-The authoritative API contract is the `UserFiles` section of Agent9's `docs/openapi.yaml`. This repository is an example client, not a replacement for the OpenAPI schema.
+The authoritative API contract is the `UserFiles` section of Agent Stack's `docs/openapi.yaml`. This repository is an example client, not a replacement for the OpenAPI schema.

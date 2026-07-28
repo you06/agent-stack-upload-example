@@ -1,4 +1,4 @@
-import { uploadMultipartFile } from '../src/agent9-user-files.mjs';
+import { uploadMultipartFile } from '../src/agent-stack-user-files.mjs';
 import { exampleConfig, requiredFilePath } from './config.mjs';
 
 const filePath = requiredFilePath();

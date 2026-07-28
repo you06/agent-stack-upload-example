@@ -5,13 +5,13 @@ import { basename } from 'node:path';
 
 const JSON_CONTENT_TYPE = 'application/json';
 
-export class Agent9ApiError extends Error {
+export class AgentStackApiError extends Error {
   constructor({ method, url, status, payload, responseText }) {
     const error = payload?.error;
     const code = error?.code ?? `http_${status}`;
     const message = error?.message ?? responseText ?? `HTTP ${status}`;
     super(`${method} ${url} failed (${status}, ${code}): ${message}`);
-    this.name = 'Agent9ApiError';
+    this.name = 'AgentStackApiError';
     this.method = method;
     this.url = url;
     this.status = status;
@@ -21,7 +21,7 @@ export class Agent9ApiError extends Error {
   }
 }
 
-export class Agent9UserFilesClient {
+export class AgentStackUserFilesClient {
   constructor({ baseUrl, apiKey, projectId, fetchImpl = globalThis.fetch }) {
     if (!baseUrl) throw new Error('baseUrl is required');
     if (!apiKey) throw new Error('apiKey is required');
@@ -86,7 +86,7 @@ export class Agent9UserFilesClient {
     });
     if (!response.ok) {
       const responseText = await response.text();
-      throw new Agent9ApiError({
+      throw new AgentStackApiError({
         method: 'PUT',
         url,
         status: response.status,
@@ -128,7 +128,7 @@ export class Agent9UserFilesClient {
     const requestUrl = new URL(pathOrUrl, baseUrl);
     if (requestUrl.origin !== baseUrl.origin) {
       throw new Error(
-        `Refusing to send the Agent9 API key to a different origin: ${requestUrl.origin}`,
+        `Refusing to send the Agent Stack API key to a different origin: ${requestUrl.origin}`,
       );
     }
     const url = requestUrl.toString();
@@ -151,7 +151,7 @@ export class Agent9UserFilesClient {
       }
     }
     if (!response.ok) {
-      throw new Agent9ApiError({
+      throw new AgentStackApiError({
         method,
         url,
         status: response.status,
