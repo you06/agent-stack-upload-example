@@ -1,0 +1,15 @@
+{
+  "name": "agent-stack-upload-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dependency-free Node.js examples for the Agent9 public 2-path user-file upload API.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "example:inline": "node examples/upload-inline.mjs",
+    "example:multipart": "node examples/upload-multipart.mjs",
+    "test": "node --test"
+  }
+}
