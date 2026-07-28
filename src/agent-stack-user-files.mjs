@@ -122,25 +122,57 @@ export class AgentStackUserFilesClient {
     });
   }
 
-  async #requestJson(pathOrUrl, init = {}) {
-    const method = init.method ?? 'GET';
-    const baseUrl = new URL(`${this.baseUrl}/`);
-    const requestUrl = new URL(pathOrUrl, baseUrl);
-    if (requestUrl.origin !== baseUrl.origin) {
-      throw new Error(
-        `Refusing to send the Agent Stack API key to a different origin: ${requestUrl.origin}`,
-      );
-    }
-    const url = requestUrl.toString();
-    const response = await this.fetch(url, {
-      ...init,
-      method,
-      headers: {
-        authorization: `Bearer ${this.apiKey}`,
-        'x-agent9-project-id': this.projectId,
-        ...init.headers,
-      },
+  async createSession() {
+    return this.#requestJson('/api/sessions', {
+      method: 'POST',
+      headers: { 'content-type': JSON_CONTENT_TYPE },
+      body: JSON.stringify({}),
     });
+  }
+
+  async runTurn({
+    sessionId,
+    text,
+    userFileIds = [],
+    onEvent = () => {},
+  }) {
+    const path = `/api/sessions/${encodeURIComponent(sessionId)}/turns`;
+    const { method, url, response } = await this.#authenticatedFetch(path, {
+      method: 'POST',
+      headers: { 'content-type': JSON_CONTENT_TYPE },
+      body: JSON.stringify({
+        input: {
+          type: 'text',
+          text,
+          userFileIds,
+        },
+      }),
+    });
+    if (!response.ok) {
+      await throwApiError({ method, url, response });
+    }
+
+    const events = [];
+    for await (const event of readNdjson(response)) {
+      events.push(event);
+      onEvent(event);
+    }
+    const assistantText =
+      events.findLast((event) => event.event === 'assistant_message')?.payload?.text ??
+      null;
+    const turnStatus =
+      events.findLast((event) => event.event === 'turn_finished')?.payload?.status ??
+      null;
+    return {
+      events,
+      turnId: events[0]?.turnId ?? null,
+      assistantText,
+      status: turnStatus,
+    };
+  }
+
+  async #requestJson(pathOrUrl, init = {}) {
+    const { method, url, response } = await this.#authenticatedFetch(pathOrUrl, init);
     const responseText = await response.text();
     let payload = null;
     if (responseText) {
@@ -164,6 +196,51 @@ export class AgentStackUserFilesClient {
     }
     return payload;
   }
+
+  async #authenticatedFetch(pathOrUrl, init = {}) {
+    const method = init.method ?? 'GET';
+    const baseUrl = new URL(`${this.baseUrl}/`);
+    const requestUrl = new URL(pathOrUrl, baseUrl);
+    if (requestUrl.origin !== baseUrl.origin) {
+      throw new Error(
+        `Refusing to send the Agent Stack API key to a different origin: ${requestUrl.origin}`,
+      );
+    }
+    const url = requestUrl.toString();
+    const response = await this.fetch(url, {
+      ...init,
+      method,
+      headers: {
+        authorization: `Bearer ${this.apiKey}`,
+        'x-agent9-project-id': this.projectId,
+        ...init.headers,
+      },
+    });
+    return { method, url, response };
+  }
+}
+
+export async function resolveExampleSession(client, sessionId) {
+  if (sessionId) {
+    return { sessionId, created: false };
+  }
+  const { session } = await client.createSession();
+  return { sessionId: session.sessionId, created: true };
+}
+
+export async function runUploadedFileTurn({
+  client,
+  sessionId,
+  userFileId,
+  prompt = '看一下这个文件的内容',
+  onEvent,
+}) {
+  return client.runTurn({
+    sessionId,
+    text: prompt,
+    userFileIds: [userFileId],
+    onEvent,
+  });
 }
 
 export async function uploadInlineFile({
@@ -336,4 +413,42 @@ function assertWithinMaximum(byteSize, maximum) {
   if (byteSize > maximum) {
     throw new Error(`File is ${byteSize} bytes; server maximum is ${maximum} bytes`);
   }
+}
+
+async function throwApiError({ method, url, response }) {
+  const responseText = await response.text();
+  let payload = null;
+  if (responseText) {
+    try {
+      payload = JSON.parse(responseText);
+    } catch {
+      payload = null;
+    }
+  }
+  throw new AgentStackApiError({
+    method,
+    url,
+    status: response.status,
+    payload,
+    responseText,
+  });
+}
+
+async function* readNdjson(response) {
+  if (!response.body) {
+    throw new Error('Turn response did not include a response body');
+  }
+  const decoder = new TextDecoder();
+  let buffered = '';
+  for await (const chunk of response.body) {
+    buffered += decoder.decode(chunk, { stream: true });
+    let newlineIndex;
+    while ((newlineIndex = buffered.indexOf('\n')) !== -1) {
+      const line = buffered.slice(0, newlineIndex).trim();
+      buffered = buffered.slice(newlineIndex + 1);
+      if (line) yield JSON.parse(line);
+    }
+  }
+  buffered += decoder.decode();
+  if (buffered.trim()) yield JSON.parse(buffered);
 }

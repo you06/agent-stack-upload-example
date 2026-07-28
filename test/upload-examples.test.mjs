@@ -6,6 +6,8 @@ import { after, before, test } from 'node:test';
 import {
   AgentStackUserFilesClient,
   rfc9530Sha256,
+  resolveExampleSession,
+  runUploadedFileTurn,
   sha256Hex,
   uploadInlineFile,
   uploadMultipartFile,
@@ -226,6 +228,84 @@ test('multipart example binds each digest, sends exact S3 headers, and completes
   assert.equal(progress.at(-1).bytesUploaded, bytes.length);
   assert.equal(result.file.status, 'ready');
   assert.equal(result.status.state, 'completed');
+});
+
+test('examples create or reuse a session and attach the uploaded file to a Turn', async () => {
+  const requests = [];
+  const client = testClient(async (url, init) => {
+    const request = await capture(url, init);
+    requests.push(request);
+    if (request.path === '/api/sessions') {
+      assert.deepEqual(JSON.parse(request.body.toString()), {});
+      return json(
+        {
+          session: {
+            sessionId: 'session-created',
+          },
+        },
+        201,
+      );
+    }
+    if (request.path === '/api/sessions/session-created/turns') {
+      assert.deepEqual(JSON.parse(request.body.toString()), {
+        input: {
+          type: 'text',
+          text: '看一下这个文件的内容',
+          userFileIds: ['file-ready'],
+        },
+      });
+      return new Response(
+        [
+          JSON.stringify({
+            event: 'turn_started',
+            turnId: 'turn-1',
+            sessionId: 'session-created',
+            seq: 1,
+            payload: {},
+          }),
+          '',
+          JSON.stringify({
+            event: 'assistant_message',
+            turnId: 'turn-1',
+            sessionId: 'session-created',
+            seq: 2,
+            payload: { messageId: 'message-1', text: 'File contents' },
+          }),
+          JSON.stringify({
+            event: 'turn_finished',
+            turnId: 'turn-1',
+            sessionId: 'session-created',
+            seq: 3,
+            payload: { status: 'succeeded' },
+          }),
+          '',
+        ].join('\n'),
+        {
+          status: 201,
+          headers: { 'content-type': 'application/x-ndjson' },
+        },
+      );
+    }
+    return json({ error: { code: 'not_found' } }, 404);
+  });
+
+  const created = await resolveExampleSession(client);
+  const reused = await resolveExampleSession(client, 'session-existing');
+  const turn = await runUploadedFileTurn({
+    client,
+    sessionId: created.sessionId,
+    userFileId: 'file-ready',
+  });
+
+  assert.deepEqual(created, { sessionId: 'session-created', created: true });
+  assert.deepEqual(reused, { sessionId: 'session-existing', created: false });
+  assert.equal(turn.turnId, 'turn-1');
+  assert.equal(turn.status, 'succeeded');
+  assert.equal(turn.assistantText, 'File contents');
+  assert.equal(turn.events.length, 3);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].headers.get('authorization'), 'Bearer test-user-key');
+  assert.equal(requests[1].headers.get('x-agent9-project-id'), 'project-test');
 });
 
 function testClient(fetchImpl) {

@@ -7,6 +7,7 @@ export function exampleConfig() {
   return {
     client: new AgentStackUserFilesClient({ baseUrl, apiKey, projectId }),
     contentType: process.env.CONTENT_TYPE ?? 'application/octet-stream',
+    sessionId: process.env.AGENT_STACK_SESSION_ID?.trim() || undefined,
   };
 }
 

@@ -29,7 +29,14 @@ Optional variables:
 
 ```bash
 export CONTENT_TYPE='application/pdf'
+export AGENT_STACK_SESSION_ID='existing-session-id'
 ```
+
+When `AGENT_STACK_SESSION_ID` is omitted, the example creates a new session. When
+it is set, the example reuses that session. In both cases, the uploaded
+`userFileId` is attached to a new Turn with the prompt `看一下这个文件的内容`
+("Look at the contents of this file"). The Session and Turn are visible in the
+web console.
 
 Each example creates its `Idempotency-Key` from the current millisecond timestamp when the process starts. The same key is reused throughout that upload attempt. Starting the command again creates a new upload intent.
 
@@ -45,10 +52,12 @@ npm run example:inline -- ./small-file.txt
 
 The example performs:
 
-1. `GET /api/user-files/upload-capabilities`
-2. `POST /api/user-files/uploads`
-3. `PUT /api/user-files/uploads/{uploadId}/content`
-4. `GET /api/user-files/uploads/{uploadId}`
+1. Reuse `AGENT_STACK_SESSION_ID`, or `POST /api/sessions` to create a session.
+2. `GET /api/user-files/upload-capabilities`
+3. `POST /api/user-files/uploads`
+4. `PUT /api/user-files/uploads/{uploadId}/content`
+5. `GET /api/user-files/uploads/{uploadId}`
+6. `POST /api/sessions/{sessionId}/turns` with the ready `userFileId`
 
 The raw `PUT` includes exact `Content-Length` and an RFC 9530 header:
 
@@ -68,15 +77,17 @@ npm run example:multipart -- ./large-file.bin
 
 The example performs:
 
-1. `GET /api/user-files/upload-capabilities`
-2. `POST /api/user-files/uploads`
-3. For every server-defined part:
+1. Reuse `AGENT_STACK_SESSION_ID`, or `POST /api/sessions` to create a session.
+2. `GET /api/user-files/upload-capabilities`
+3. `POST /api/user-files/uploads`
+4. For every server-defined part:
    - compute the exact part SHA-256;
    - `POST /api/user-files/uploads/{uploadId}/parts/{partNumber}/presign`;
    - `PUT` the exact bytes directly to the returned S3 URL with every returned header;
    - retain the S3 `ETag`.
-4. `POST /api/user-files/uploads/{uploadId}/complete` with all parts in ascending order.
-5. `GET /api/user-files/uploads/{uploadId}`
+5. `POST /api/user-files/uploads/{uploadId}/complete` with all parts in ascending order.
+6. `GET /api/user-files/uploads/{uploadId}`
+7. `POST /api/sessions/{sessionId}/turns` with the ready `userFileId`
 
 The server, not the caller, defines `partSize` and `totalParts`. Only the final part may be smaller.
 
@@ -134,6 +145,10 @@ console.log(result.file);
 
 Use `uploadMultipartFile` with the same client for the S3 path.
 
+The runnable examples additionally use `resolveExampleSession` and
+`runUploadedFileTurn` to create or reuse a Session and submit the uploaded file
+to a Turn.
+
 ## Validation
 
 Run the dependency-free contract tests:
@@ -142,7 +157,10 @@ Run the dependency-free contract tests:
 npm test
 ```
 
-The tests verify authentication headers, request metadata, RFC 9530 digest formatting, exact part boundaries, checksum binding, direct-S3 headers, ETag retention, ordered completion, and final status lookup.
+The tests verify authentication headers, Session creation/reuse, selected
+`userFileId` Turn input, NDJSON Turn responses, request metadata, RFC 9530 digest
+formatting, exact part boundaries, checksum binding, direct-S3 headers, ETag
+retention, ordered completion, and final status lookup.
 
 ## Contract source
 
