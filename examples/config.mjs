@@ -31,6 +31,10 @@ export function requiredDownloadRequest() {
   };
 }
 
+export function optionalDirectoryPath() {
+  return process.argv.length > 2 ? process.argv[2] : undefined;
+}
+
 function requiredEnv(name) {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is required`);

@@ -1,12 +1,15 @@
-# Agent Stack file upload and download examples
+# Agent Stack file examples
 
 Dependency-free Node.js examples for the public Agent Stack file APIs:
 
 - **Inline path:** the client sends the complete file to Agent Stack. Agent Stack verifies the whole-file SHA-256.
 - **Multipart path:** Agent Stack returns checksum-bound presigned URLs. The client sends each part directly to S3, then asks Agent Stack to complete the upload.
+- **List path:** the client lists Project Drive files and prints their download-ready `relPath` values.
 - **Download path:** the client exchanges its user API key for a 60-second opaque URL, then redeems that URL without credentials. Agent Stack streams inline bytes or redirects large files to S3.
 
-The server chooses the path from the current `inlineThreshold`. Do not hard-code that threshold: both examples read `GET /api/user-files/upload-capabilities` first.
+The server chooses the upload path from the current `inlineThreshold`. Do not
+hard-code that threshold: both upload examples read
+`GET /api/user-files/upload-capabilities` first.
 
 ## Requirements
 
@@ -43,6 +46,29 @@ participate in that Session; otherwise the API returns `session_not_found`.
 Each example creates its `Idempotency-Key` from the current millisecond timestamp when the process starts. The same key is reused throughout that upload attempt. Starting the command again creates a new upload intent.
 
 The examples never print the API key.
+
+## List files
+
+List the Project Drive's legacy flat file view:
+
+```bash
+npm run example:list-files
+```
+
+The response contains a `files` array. Each entry includes `name`, `relPath`,
+`size`, `modifiedAt`, `type`, and `isDir`; pass a file's `relPath` to the
+download example.
+
+To browse one directory instead, pass its project-relative path:
+
+```bash
+npm run example:list-files -- 'sess_0f84cddee3c64fc688014aa9a11e6bd3'
+```
+
+Directory mode sends `GET /api/console/drive/{projectId}?path=...` and returns
+separate `folders` and `files` arrays plus breadcrumbs. Pass an empty argument
+(`''`) to browse the project root as a directory. Listing is not recursive in
+directory mode; use a returned folder's `relPath` for the next request.
 
 ## Download
 
@@ -183,6 +209,10 @@ console.log(result.file);
 
 Use `uploadMultipartFile` with the same client for the S3 path.
 
+Use `client.listDriveFiles()` for the flat Project Drive file list, or
+`client.listDriveFiles({ directoryPath: 'session-id' })` to browse one
+directory.
+
 Use `downloadDriveFile` for the download path:
 
 ```js
@@ -210,8 +240,9 @@ npm test
 The tests verify authentication headers, Session creation/reuse, selected
 `userFileId` Turn input, NDJSON Turn responses, request metadata, RFC 9530 digest
 formatting, exact part boundaries, checksum binding, direct-S3 headers, ETag
-retention, ordered completion, final status lookup, authenticated URL minting,
-anonymous redemption, and streamed file output.
+retention, ordered completion, final status lookup, authenticated Drive
+listing, authenticated URL minting, anonymous redemption, and streamed file
+output.
 
 ## Contract source
 

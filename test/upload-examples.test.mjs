@@ -309,6 +309,59 @@ test('examples create or reuse a session and attach the uploaded file to a Turn'
   assert.equal(requests[1].headers.get('x-agent9-project-id'), 'project-test');
 });
 
+test('list files returns flat relPaths or browses one directory', async () => {
+  const requests = [];
+  const client = testClient(async (url, init) => {
+    const request = await capture(url, init);
+    requests.push(request);
+    assert.equal(request.method, 'GET');
+    assert.equal(request.headers.get('authorization'), 'Bearer test-user-key');
+    assert.equal(request.headers.get('x-agent9-project-id'), 'project-test');
+
+    if (request.search === '') {
+      return json({
+        files: [
+          {
+            name: 'report.pdf',
+            relPath: 'session-1/output/report.pdf',
+            size: 128,
+            modifiedAt: '2099-01-01T00:00:00.000Z',
+            type: 'pdf',
+            isDir: false,
+          },
+        ],
+      });
+    }
+    assert.equal(request.search, '?path=session-1%2Foutput');
+    return json({
+      project: { projectId: 'project-test', name: 'Test' },
+      path: 'session-1/output',
+      breadcrumbs: [],
+      folders: [],
+      files: [
+        {
+          name: 'report.pdf',
+          relPath: 'session-1/output/report.pdf',
+          size: 128,
+          modifiedAt: '2099-01-01T00:00:00.000Z',
+          type: 'pdf',
+          isDir: false,
+        },
+      ],
+    });
+  });
+
+  const flat = await client.listDriveFiles();
+  const directory = await client.listDriveFiles({
+    directoryPath: 'session-1/output',
+  });
+
+  assert.equal(flat.files[0].relPath, 'session-1/output/report.pdf');
+  assert.equal(directory.path, 'session-1/output');
+  assert.equal(directory.files[0].relPath, flat.files[0].relPath);
+  assert.equal(requests.length, 2);
+});
+
 test('download example mints with a user key and redeems without credentials', async () => {
   const bytes = Buffer.from('downloaded example');
   const outputPath = join(root, 'downloads', 'poem.txt');
@@ -428,6 +481,7 @@ async function capture(url, init) {
   return {
     origin: parsed.origin,
     path: parsed.pathname,
+    search: parsed.search,
     method: init.method ?? 'GET',
     headers,
     body,

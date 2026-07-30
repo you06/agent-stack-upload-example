@@ -133,6 +133,17 @@ export class AgentStackUserFilesClient {
     );
   }
 
+  async listDriveFiles({ directoryPath } = {}) {
+    const query = new URLSearchParams();
+    if (directoryPath !== undefined) {
+      query.set('path', directoryPath);
+    }
+    const suffix = query.size === 0 ? '' : `?${query.toString()}`;
+    return this.#requestJson(
+      `/api/console/drive/${encodeURIComponent(this.projectId)}${suffix}`,
+    );
+  }
+
   async redeemDownloadUrl({ url, outputPath }) {
     const baseUrl = new URL(`${this.baseUrl}/`);
     const requestUrl = new URL(url, baseUrl);
