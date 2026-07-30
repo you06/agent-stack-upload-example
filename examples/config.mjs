@@ -35,6 +35,22 @@ export function optionalDirectoryPath() {
   return process.argv.length > 2 ? process.argv[2] : undefined;
 }
 
+export function optionalArtifactQuery() {
+  return process.argv.length > 2 ? process.argv[2] : undefined;
+}
+
+export function requiredArtifactDownloadRequest() {
+  const artifactId = process.argv[2];
+  const revisionId = process.argv[3];
+  const outputPath = process.argv[4];
+  if (!artifactId || !revisionId || !outputPath) {
+    throw new Error(
+      `Usage: ${process.argv[1]} <artifact-id> <revision-id> <output-path>`,
+    );
+  }
+  return { artifactId, revisionId, outputPath };
+}
+
 function requiredEnv(name) {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is required`);

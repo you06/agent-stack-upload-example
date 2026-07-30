@@ -144,6 +144,27 @@ export class AgentStackUserFilesClient {
     );
   }
 
+  async listArtifacts({ query, kind, role, cursor, limit } = {}) {
+    const search = new URLSearchParams();
+    if (query !== undefined) search.set('q', query);
+    if (kind !== undefined) search.set('kind', kind);
+    if (role !== undefined) search.set('role', role);
+    if (cursor !== undefined) search.set('cursor', cursor);
+    if (limit !== undefined) search.set('limit', String(limit));
+    const suffix = search.size === 0 ? '' : `?${search.toString()}`;
+    return this.#requestJson(`/api/artifacts${suffix}`);
+  }
+
+  async createArtifactDownloadUrl({ artifactId, revisionId }) {
+    if (!artifactId) throw new Error('artifactId is required');
+    if (!revisionId) throw new Error('revisionId is required');
+    return this.#requestJson(
+      `/api/artifacts/${encodeURIComponent(artifactId)}/revisions/` +
+        `${encodeURIComponent(revisionId)}/download-url`,
+      { method: 'POST' },
+    );
+  }
+
   async redeemDownloadUrl({ url, outputPath }) {
     const baseUrl = new URL(`${this.baseUrl}/`);
     const requestUrl = new URL(url, baseUrl);
@@ -319,16 +340,93 @@ export async function downloadDriveFile({
   if (!relPath) throw new Error('relPath is required');
   if (!outputPath) throw new Error('outputPath is required');
 
-  const { url, expiresAt } = await client.createDownloadUrl({ relPath });
-  if (!url || !expiresAt) {
-    throw new Error('Download URL response did not include url and expiresAt');
-  }
-  const file = await client.redeemDownloadUrl({ url, outputPath });
+  const mint = validateDownloadMint(
+    await client.createDownloadUrl({ relPath }),
+  );
+  const file = await redeemAndVerifyDownload({
+    client,
+    mint,
+    outputPath,
+  });
   return {
     relPath,
-    expiresAt,
+    expiresAt: mint.expiresAt,
     ...file,
   };
+}
+
+export async function downloadArtifactRevision({
+  client,
+  artifactId,
+  revisionId,
+  outputPath,
+}) {
+  if (!artifactId) throw new Error('artifactId is required');
+  if (!revisionId) throw new Error('revisionId is required');
+  if (!outputPath) throw new Error('outputPath is required');
+
+  const mint = validateDownloadMint(
+    await client.createArtifactDownloadUrl({ artifactId, revisionId }),
+    { requireSha256: true },
+  );
+  const file = await redeemAndVerifyDownload({
+    client,
+    mint,
+    outputPath,
+  });
+  return {
+    artifactId,
+    revisionId,
+    expiresAt: mint.expiresAt,
+    ...file,
+  };
+}
+
+async function redeemAndVerifyDownload({ client, mint, outputPath }) {
+  const file = await client.redeemDownloadUrl({
+    url: mint.url,
+    outputPath,
+  });
+  try {
+    if (file.byteSize !== mint.byteSize) {
+      throw new Error(
+        `Downloaded byte size mismatch: expected ${mint.byteSize}, got ${file.byteSize}`,
+      );
+    }
+    if (mint.sha256 && file.sha256 !== mint.sha256) {
+      throw new Error(
+        `Downloaded SHA-256 mismatch: expected ${mint.sha256}, got ${file.sha256}`,
+      );
+    }
+    return file;
+  } catch (error) {
+    await rm(file.outputPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+function validateDownloadMint(value, { requireSha256 = false } = {}) {
+  if (
+    !value ||
+    typeof value.url !== 'string' ||
+    value.url.length === 0 ||
+    typeof value.expiresAt !== 'string' ||
+    value.expiresAt.length === 0 ||
+    !Number.isSafeInteger(value.byteSize) ||
+    value.byteSize < 0
+  ) {
+    throw new Error(
+      'Download URL response did not include valid url, expiresAt, and byteSize',
+    );
+  }
+  if (
+    (value.sha256 !== undefined &&
+      !/^[0-9a-f]{64}$/u.test(value.sha256)) ||
+    (requireSha256 && value.sha256 === undefined)
+  ) {
+    throw new Error('Download URL response did not include a valid SHA-256');
+  }
+  return value;
 }
 
 export async function uploadInlineFile({

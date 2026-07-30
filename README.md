@@ -6,6 +6,7 @@ Dependency-free Node.js examples for the public Agent Stack file APIs:
 - **Multipart path:** Agent Stack returns checksum-bound presigned URLs. The client sends each part directly to S3, then asks Agent Stack to complete the upload.
 - **List path:** the client lists Project Drive files and prints their download-ready `relPath` values.
 - **Download path:** the client exchanges its user API key for a 60-second opaque URL, then redeems that URL without credentials. Agent Stack streams inline bytes or redirects large files to S3.
+- **Artifact paths:** the client lists the caller's ready Artifact catalog and downloads one immutable revision through the same two-phase ticket flow, with end-to-end size and SHA-256 verification.
 
 The server chooses the upload path from the current `inlineThreshold`. Do not
 hard-code that threshold: both upload examples read
@@ -105,6 +106,57 @@ The current S3 redirect does not guarantee preservation of the original browser
 download filename. This CLI writes to the explicit local output path and is not
 affected by that browser limitation.
 
+## List Artifacts
+
+List the caller's ready current Artifact catalog:
+
+```bash
+npm run example:list-artifacts
+```
+
+Each `artifacts` entry contains logical Artifact metadata and its current ready
+`revision`, including the `artifactId`, `revisionId`, `safeName`, `byteSize`, and
+`sha256` needed for download. The response is paginated and includes
+`nextCursor`.
+
+Pass an optional free-text query to search display names and descriptions:
+
+```bash
+npm run example:list-artifacts -- 'quarterly report'
+```
+
+The reusable `client.listArtifacts()` method also accepts `kind`, `role`,
+`cursor`, and `limit` for filtered or paginated clients.
+
+## Download an Artifact
+
+Pass an `artifactId`, `revisionId`, and explicit local output path from the
+Artifact listing:
+
+```bash
+npm run example:download-artifact -- \
+  'artifact_abc123' \
+  'revision_def456' \
+  './quarterly-report.pdf'
+```
+
+The example performs:
+
+1. `POST /api/artifacts/{artifactId}/revisions/{revisionId}/download-url` with
+   the user API key and project header.
+2. Read the relative 60-second URL, immutable `byteSize`, and required
+   `sha256`. The bearer URL itself is never printed.
+3. Redeem `/api/drive-downloads/{ticket}` without credentials. Despite the
+   route name, this endpoint redeems both Drive and Artifact tickets.
+4. Follow a validated S3 redirect or receive inline bytes, then write through a
+   private temporary file and atomically rename it.
+5. Recompute the downloaded file's byte size and SHA-256. A mismatch fails the
+   command and deletes the output file.
+
+Artifact authorization is unchanged: ordinary Artifacts remain scoped to their
+owner, while eligible generated media can also be read by an active source
+Session participant. This demo does not make Artifacts project-wide.
+
 ## Inline upload
 
 Choose a file smaller than the server's current `inlineThreshold`:
@@ -187,6 +239,7 @@ The examples throw `AgentStackApiError` with `status`, `code`, `details`, and th
 ```js
 import {
   AgentStackUserFilesClient,
+  downloadArtifactRevision,
   downloadDriveFile,
   uploadInlineFile,
   uploadMultipartFile,
@@ -225,6 +278,23 @@ const downloaded = await downloadDriveFile({
 console.log(downloaded.sha256);
 ```
 
+Use `client.listArtifacts()` and `downloadArtifactRevision` for immutable
+Artifact revisions:
+
+```js
+const { artifacts } = await client.listArtifacts({ limit: 25 });
+const { artifact, revision } = artifacts[0];
+
+const downloadedArtifact = await downloadArtifactRevision({
+  client,
+  artifactId: artifact.artifactId,
+  revisionId: revision.revisionId,
+  outputPath: `./${revision.safeName}`,
+});
+
+console.log(downloadedArtifact.sha256);
+```
+
 The runnable examples additionally use `resolveExampleSession` and
 `runUploadedFileTurn` to create or reuse a Session and submit the uploaded file
 to a Turn.
@@ -243,6 +313,10 @@ formatting, exact part boundaries, checksum binding, direct-S3 headers, ETag
 retention, ordered completion, final status lookup, authenticated Drive
 listing, authenticated URL minting, anonymous redemption, and streamed file
 output.
+
+Artifact tests additionally verify authenticated catalog listing, authenticated
+Artifact ticket minting, anonymous shared redemption, and deletion of output
+when immutable size or SHA-256 metadata does not match.
 
 ## Contract source
 

@@ -12,6 +12,8 @@
     "example:multipart": "node examples/upload-multipart.mjs",
     "example:list-files": "node examples/list-files.mjs",
     "example:download": "node examples/download-file.mjs",
+    "example:list-artifacts": "node examples/list-artifacts.mjs",
+    "example:download-artifact": "node examples/download-artifact.mjs",
     "test": "node --test"
   }
 }

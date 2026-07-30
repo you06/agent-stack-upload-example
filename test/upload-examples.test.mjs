@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import {
   AgentStackUserFilesClient,
+  downloadArtifactRevision,
   downloadDriveFile,
   rfc9530Sha256,
   resolveExampleSession,
@@ -362,6 +363,56 @@ test('list files returns flat relPaths or browses one directory', async () => {
   assert.equal(requests.length, 2);
 });
 
+test('list artifacts returns current ready revisions with optional filters', async () => {
+  const requests = [];
+  const client = testClient(async (url, init) => {
+    const request = await capture(url, init);
+    requests.push(request);
+    assert.equal(request.method, 'GET');
+    assert.equal(request.headers.get('authorization'), 'Bearer test-user-key');
+    assert.equal(request.headers.get('x-agent9-project-id'), 'project-test');
+    assert.equal(
+      request.search,
+      '?q=quarterly+report&kind=document&role=deliverable&cursor=next-page&limit=25',
+    );
+    return json({
+      artifacts: [
+        {
+          artifact: {
+            artifactId: 'artifact-1',
+            displayName: 'Quarterly report',
+            kind: 'document',
+            role: 'deliverable',
+            currentRevisionId: 'revision-3',
+          },
+          revision: {
+            revisionId: 'revision-3',
+            artifactId: 'artifact-1',
+            safeName: 'quarterly-report.pdf',
+            byteSize: 128,
+            sha256: 'a'.repeat(64),
+            state: 'ready',
+          },
+        },
+      ],
+      nextCursor: null,
+    });
+  });
+
+  const result = await client.listArtifacts({
+    query: 'quarterly report',
+    kind: 'document',
+    role: 'deliverable',
+    cursor: 'next-page',
+    limit: 25,
+  });
+
+  assert.equal(result.artifacts[0].artifact.artifactId, 'artifact-1');
+  assert.equal(result.artifacts[0].revision.revisionId, 'revision-3');
+  assert.equal(result.artifacts[0].revision.safeName, 'quarterly-report.pdf');
+  assert.equal(requests.length, 1);
+});
+
 test('download example mints with a user key and redeems without credentials', async () => {
   const bytes = Buffer.from('downloaded example');
   const outputPath = join(root, 'downloads', 'poem.txt');
@@ -380,6 +431,7 @@ test('download example mints with a user key and redeems without credentials', a
       return json({
         url: '/api/drive-downloads/opaque-ticket',
         expiresAt: '2099-01-01T00:00:00.000Z',
+        byteSize: bytes.length,
       });
     }
     if (request.path === '/api/drive-downloads/opaque-ticket') {
@@ -411,6 +463,117 @@ test('download example mints with a user key and redeems without credentials', a
   assert.equal(requests.length, 2);
   assert.equal(requests[0].headers.get('authorization'), 'Bearer test-user-key');
   assert.equal(requests[0].headers.get('x-agent9-project-id'), 'project-test');
+});
+
+test('artifact download mints integrity metadata and verifies anonymous bytes', async () => {
+  const bytes = Buffer.from('immutable artifact');
+  const digest = sha256Hex(bytes);
+  const outputPath = join(root, 'downloads', 'artifact.pdf');
+  const requests = [];
+  const client = testClient(async (url, init) => {
+    const request = await capture(url, init);
+    requests.push(request);
+    if (
+      request.path ===
+      '/api/artifacts/artifact-1/revisions/revision-3/download-url'
+    ) {
+      assert.equal(request.method, 'POST');
+      assert.equal(request.body.length, 0);
+      return json({
+        url: '/api/drive-downloads/v2.artifact.k1.opaque',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+        byteSize: bytes.length,
+        sha256: digest,
+      });
+    }
+    if (
+      request.path ===
+      '/api/drive-downloads/v2.artifact.k1.opaque'
+    ) {
+      assert.equal(request.method, 'GET');
+      assert.equal(request.headers.get('authorization'), null);
+      assert.equal(request.headers.get('x-agent9-project-id'), null);
+      assert.equal(request.redirect, 'follow');
+      return new Response(bytes, {
+        status: 200,
+        headers: { 'content-type': 'application/pdf' },
+      });
+    }
+    return json({ error: { code: 'not_found' } }, 404);
+  });
+
+  const result = await downloadArtifactRevision({
+    client,
+    artifactId: 'artifact-1',
+    revisionId: 'revision-3',
+    outputPath,
+  });
+
+  assert.deepEqual(await readFile(outputPath), bytes);
+  assert.equal(result.outputPath, outputPath);
+  assert.equal(result.byteSize, bytes.length);
+  assert.equal(result.sha256, digest);
+  assert.equal(result.contentType, 'application/pdf');
+  assert.equal(result.expiresAt, '2099-01-01T00:00:00.000Z');
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].headers.get('authorization'), 'Bearer test-user-key');
+  assert.equal(requests[0].headers.get('x-agent9-project-id'), 'project-test');
+});
+
+test('artifact download deletes output when integrity metadata does not match', async () => {
+  const bytes = Buffer.from('wrong artifact bytes');
+  const outputPath = join(root, 'downloads', 'invalid-artifact.bin');
+  const client = testClient(async (url) => {
+    const path = new URL(url).pathname;
+    if (path.endsWith('/download-url')) {
+      return json({
+        url: '/api/drive-downloads/v2.artifact.k1.mismatch',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+        byteSize: bytes.length,
+        sha256: '0'.repeat(64),
+      });
+    }
+    return new Response(bytes, { status: 200 });
+  });
+
+  await assert.rejects(
+    downloadArtifactRevision({
+      client,
+      artifactId: 'artifact-1',
+      revisionId: 'revision-3',
+      outputPath,
+    }),
+    /Downloaded SHA-256 mismatch/u,
+  );
+  await assert.rejects(readFile(outputPath), { code: 'ENOENT' });
+});
+
+test('artifact download deletes output when immutable byte size does not match', async () => {
+  const bytes = Buffer.from('truncated artifact');
+  const outputPath = join(root, 'downloads', 'truncated-artifact.bin');
+  const client = testClient(async (url) => {
+    const path = new URL(url).pathname;
+    if (path.endsWith('/download-url')) {
+      return json({
+        url: '/api/drive-downloads/v2.artifact.k1.truncated',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+        byteSize: bytes.length + 1,
+        sha256: sha256Hex(bytes),
+      });
+    }
+    return new Response(bytes, { status: 200 });
+  });
+
+  await assert.rejects(
+    downloadArtifactRevision({
+      client,
+      artifactId: 'artifact-1',
+      revisionId: 'revision-3',
+      outputPath,
+    }),
+    /Downloaded byte size mismatch/u,
+  );
+  await assert.rejects(readFile(outputPath), { code: 'ENOENT' });
 });
 
 test('download errors redact the bearer ticket', async () => {
