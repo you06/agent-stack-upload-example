@@ -63,7 +63,7 @@ download example.
 To browse one directory instead, pass its project-relative path:
 
 ```bash
-npm run example:list-files -- 'sess_0f84cddee3c64fc688014aa9a11e6bd3'
+npm run example:list-files -- 'sess_xxxx'
 ```
 
 Directory mode sends `GET /api/console/drive/{projectId}?path=...` and returns
@@ -79,7 +79,7 @@ written in the current directory.
 
 ```bash
 npm run example:download -- \
-  'sess_0f84cddee3c64fc688014aa9a11e6bd3/给你的诗.docx' \
+  'sess_xxxx/给你的诗.docx' \
   './给你的诗.docx'
 ```
 
