@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto';
-import { open, readFile, stat } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
-import { basename } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 
 const JSON_CONTENT_TYPE = 'application/json';
 
@@ -120,6 +120,63 @@ export class AgentStackUserFilesClient {
     return this.#requestJson(`/api/user-files/uploads/${encodeURIComponent(uploadId)}`, {
       method: 'DELETE',
     });
+  }
+
+  async createDownloadUrl({ relPath }) {
+    return this.#requestJson(
+      `/api/console/drive/${encodeURIComponent(this.projectId)}/file/download-url`,
+      {
+        method: 'POST',
+        headers: { 'content-type': JSON_CONTENT_TYPE },
+        body: JSON.stringify({ relPath }),
+      },
+    );
+  }
+
+  async redeemDownloadUrl({ url, outputPath }) {
+    const baseUrl = new URL(`${this.baseUrl}/`);
+    const requestUrl = new URL(url, baseUrl);
+    const downloadPath = /^\/api\/drive-downloads\/[^/]+$/u;
+    if (
+      requestUrl.origin !== baseUrl.origin ||
+      requestUrl.username ||
+      requestUrl.password ||
+      requestUrl.search ||
+      requestUrl.hash ||
+      !downloadPath.test(requestUrl.pathname)
+    ) {
+      throw new Error(
+        'Refusing to redeem an invalid Agent Stack download ticket URL',
+      );
+    }
+
+    const response = await this.fetch(requestUrl, {
+      method: 'GET',
+      redirect: 'follow',
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      await throwApiError({
+        method: 'GET',
+        url: `${baseUrl.origin}/api/drive-downloads/[redacted]`,
+        response,
+      });
+    }
+    if (!response.body) {
+      throw new Error('Download response did not include a response body');
+    }
+
+    const absoluteOutputPath = await writeResponseBody({
+      response,
+      outputPath,
+    });
+    const fileStat = await stat(absoluteOutputPath);
+    return {
+      outputPath: absoluteOutputPath,
+      byteSize: fileStat.size,
+      sha256: await sha256File(absoluteOutputPath),
+      contentType: response.headers.get('content-type'),
+    };
   }
 
   async createSession() {
@@ -241,6 +298,26 @@ export async function runUploadedFileTurn({
     userFileIds: [userFileId],
     onEvent,
   });
+}
+
+export async function downloadDriveFile({
+  client,
+  relPath,
+  outputPath = basename(relPath),
+}) {
+  if (!relPath) throw new Error('relPath is required');
+  if (!outputPath) throw new Error('outputPath is required');
+
+  const { url, expiresAt } = await client.createDownloadUrl({ relPath });
+  if (!url || !expiresAt) {
+    throw new Error('Download URL response did not include url and expiresAt');
+  }
+  const file = await client.redeemDownloadUrl({ url, outputPath });
+  return {
+    relPath,
+    expiresAt,
+    ...file,
+  };
 }
 
 export async function uploadInlineFile({
@@ -432,6 +509,48 @@ async function throwApiError({ method, url, response }) {
     payload,
     responseText,
   });
+}
+
+async function writeResponseBody({ response, outputPath }) {
+  const absoluteOutputPath = resolve(outputPath);
+  await mkdir(dirname(absoluteOutputPath), { recursive: true });
+  const temporaryPath = `${absoluteOutputPath}.part-${randomUUID()}`;
+  const reader = response.body.getReader();
+  let handle;
+
+  try {
+    handle = await open(temporaryPath, 'wx', 0o600);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      await writeAll(handle, value);
+    }
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await rename(temporaryPath, absoluteOutputPath);
+    return absoluteOutputPath;
+  } catch (error) {
+    await reader.cancel(error).catch(() => {});
+    await handle?.close().catch(() => {});
+    await rm(temporaryPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function writeAll(handle, bytes) {
+  let offset = 0;
+  while (offset < bytes.length) {
+    const { bytesWritten } = await handle.write(
+      bytes,
+      offset,
+      bytes.length - offset,
+    );
+    if (bytesWritten <= 0) {
+      throw new Error('Download output write made no progress');
+    }
+    offset += bytesWritten;
+  }
 }
 
 async function* readNdjson(response) {

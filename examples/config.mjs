@@ -1,4 +1,5 @@
 import { AgentStackUserFilesClient } from '../src/agent-stack-user-files.mjs';
+import { basename } from 'node:path';
 
 export function exampleConfig() {
   const baseUrl = requiredEnv('AGENT_STACK_BASE_URL');
@@ -17,6 +18,17 @@ export function requiredFilePath() {
     throw new Error(`Usage: ${process.argv[1]} <file-path>`);
   }
   return filePath;
+}
+
+export function requiredDownloadRequest() {
+  const relPath = process.argv[2];
+  if (!relPath) {
+    throw new Error(`Usage: ${process.argv[1]} <drive-rel-path> [output-path]`);
+  }
+  return {
+    relPath,
+    outputPath: process.argv[3] ?? basename(relPath),
+  };
 }
 
 function requiredEnv(name) {

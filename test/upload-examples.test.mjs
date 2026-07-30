@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import {
   AgentStackUserFilesClient,
+  downloadDriveFile,
   rfc9530Sha256,
   resolveExampleSession,
   runUploadedFileTurn,
@@ -308,6 +309,106 @@ test('examples create or reuse a session and attach the uploaded file to a Turn'
   assert.equal(requests[1].headers.get('x-agent9-project-id'), 'project-test');
 });
 
+test('download example mints with a user key and redeems without credentials', async () => {
+  const bytes = Buffer.from('downloaded example');
+  const outputPath = join(root, 'downloads', 'poem.txt');
+  const requests = [];
+  const client = testClient(async (url, init) => {
+    const request = await capture(url, init);
+    requests.push(request);
+    if (
+      request.path ===
+      '/api/console/drive/project-test/file/download-url'
+    ) {
+      assert.equal(request.method, 'POST');
+      assert.deepEqual(JSON.parse(request.body.toString()), {
+        relPath: 'session-1/poem.txt',
+      });
+      return json({
+        url: '/api/drive-downloads/opaque-ticket',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      });
+    }
+    if (request.path === '/api/drive-downloads/opaque-ticket') {
+      assert.equal(request.method, 'GET');
+      assert.equal(request.headers.get('authorization'), null);
+      assert.equal(request.headers.get('x-agent9-project-id'), null);
+      assert.equal(request.redirect, 'follow');
+      assert.equal(request.cache, 'no-store');
+      return new Response(bytes, {
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+      });
+    }
+    return json({ error: { code: 'not_found' } }, 404);
+  });
+
+  const result = await downloadDriveFile({
+    client,
+    relPath: 'session-1/poem.txt',
+    outputPath,
+  });
+
+  assert.deepEqual(await readFile(outputPath), bytes);
+  assert.equal(result.outputPath, outputPath);
+  assert.equal(result.byteSize, bytes.length);
+  assert.equal(result.sha256, sha256Hex(bytes));
+  assert.equal(result.contentType, 'text/plain');
+  assert.equal(result.expiresAt, '2099-01-01T00:00:00.000Z');
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].headers.get('authorization'), 'Bearer test-user-key');
+  assert.equal(requests[0].headers.get('x-agent9-project-id'), 'project-test');
+});
+
+test('download errors redact the bearer ticket', async () => {
+  const ticket = 'opaque-ticket-that-must-not-leak';
+  const client = testClient(async () =>
+    json({ error: { code: 'download_not_found', message: 'Not found' } }, 404),
+  );
+
+  await assert.rejects(
+    client.redeemDownloadUrl({
+      url: `https://agent-stack.example/api/drive-downloads/${ticket}`,
+      outputPath: join(root, 'downloads', 'missing.txt'),
+    }),
+    (error) => {
+      assert.equal(error.status, 404);
+      assert.equal(error.code, 'download_not_found');
+      assert.equal(
+        error.url,
+        'https://agent-stack.example/api/drive-downloads/[redacted]',
+      );
+      assert.equal(error.message.includes(ticket), false);
+      return true;
+    },
+  );
+});
+
+test('download redemption rejects non-ticket URL variants before fetch', async () => {
+  let fetchCalls = 0;
+  const client = testClient(async () => {
+    fetchCalls += 1;
+    throw new Error('fetch should not be called');
+  });
+
+  for (const url of [
+    'https://s3.example/api/drive-downloads/opaque-ticket',
+    '/api/drive-downloads/opaque-ticket/extra',
+    '/api/drive-downloads/opaque-ticket?leak=1',
+    '/api/drive-downloads/opaque-ticket#fragment',
+  ]) {
+    await assert.rejects(
+      client.redeemDownloadUrl({
+        url,
+        outputPath: join(root, 'downloads', 'invalid.txt'),
+      }),
+      /invalid Agent Stack download ticket URL/u,
+    );
+  }
+
+  assert.equal(fetchCalls, 0);
+});
+
 function testClient(fetchImpl) {
   return new AgentStackUserFilesClient({
     baseUrl: 'https://agent-stack.example',
@@ -330,6 +431,8 @@ async function capture(url, init) {
     method: init.method ?? 'GET',
     headers,
     body,
+    redirect: init.redirect,
+    cache: init.cache,
   };
 }
 

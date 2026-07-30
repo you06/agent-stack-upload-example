@@ -1,9 +1,10 @@
-# Agent Stack public 2-path upload examples
+# Agent Stack file upload and download examples
 
-Dependency-free Node.js examples for the public Agent Stack user-file upload API:
+Dependency-free Node.js examples for the public Agent Stack file APIs:
 
 - **Inline path:** the client sends the complete file to Agent Stack. Agent Stack verifies the whole-file SHA-256.
 - **Multipart path:** Agent Stack returns checksum-bound presigned URLs. The client sends each part directly to S3, then asks Agent Stack to complete the upload.
+- **Download path:** the client exchanges its user API key for a 60-second opaque URL, then redeems that URL without credentials. Agent Stack streams inline bytes or redirects large files to S3.
 
 The server chooses the path from the current `inlineThreshold`. Do not hard-code that threshold: both examples read `GET /api/user-files/upload-capabilities` first.
 
@@ -42,6 +43,41 @@ participate in that Session; otherwise the API returns `session_not_found`.
 Each example creates its `Idempotency-Key` from the current millisecond timestamp when the process starts. The same key is reused throughout that upload attempt. Starting the command again creates a new upload intent.
 
 The examples never print the API key.
+
+## Download
+
+Pass the Drive-relative path returned by the Drive listing API. An optional
+second argument selects the local output path; otherwise the remote basename is
+written in the current directory.
+
+```bash
+npm run example:download -- \
+  'sess_0f84cddee3c64fc688014aa9a11e6bd3/给你的诗.docx' \
+  './给你的诗.docx'
+```
+
+The example performs:
+
+1. `POST /api/console/drive/{projectId}/file/download-url` with the user API
+   key and `{ "relPath": "..." }`.
+2. Read the returned opaque URL and expiry. The URL itself is never printed.
+3. `GET /api/drive-downloads/{ticket}` **without** the API key or project
+   header.
+4. Follow an Agent Stack redirect to S3 when the file uses object storage, or
+   stream an inline response directly.
+5. Write through a private temporary file, atomically rename it to the requested
+   output path, and print the final byte size and SHA-256.
+
+The Agent Stack ticket is reusable for 60 seconds. A redeemed S3 URL can remain
+usable for up to 10 additional minutes. Revoking the API key or removing the
+user from the project blocks new URLs but does not revoke an already-issued
+ticket or S3 URL. A successful download returns the exact version captured at
+mint time; overwrite or deletion can make it return `404`, but it never switches
+to a newer version.
+
+The current S3 redirect does not guarantee preservation of the original browser
+download filename. This CLI writes to the explicit local output path and is not
+affected by that browser limitation.
 
 ## Inline upload
 
@@ -125,6 +161,7 @@ The examples throw `AgentStackApiError` with `status`, `code`, `details`, and th
 ```js
 import {
   AgentStackUserFilesClient,
+  downloadDriveFile,
   uploadInlineFile,
   uploadMultipartFile,
 } from './src/agent-stack-user-files.mjs';
@@ -146,6 +183,18 @@ console.log(result.file);
 
 Use `uploadMultipartFile` with the same client for the S3 path.
 
+Use `downloadDriveFile` for the download path:
+
+```js
+const downloaded = await downloadDriveFile({
+  client,
+  relPath: 'session-id/output/report.pdf',
+  outputPath: './report.pdf',
+});
+
+console.log(downloaded.sha256);
+```
+
 The runnable examples additionally use `resolveExampleSession` and
 `runUploadedFileTurn` to create or reuse a Session and submit the uploaded file
 to a Turn.
@@ -161,8 +210,10 @@ npm test
 The tests verify authentication headers, Session creation/reuse, selected
 `userFileId` Turn input, NDJSON Turn responses, request metadata, RFC 9530 digest
 formatting, exact part boundaries, checksum binding, direct-S3 headers, ETag
-retention, ordered completion, and final status lookup.
+retention, ordered completion, final status lookup, authenticated URL minting,
+anonymous redemption, and streamed file output.
 
 ## Contract source
 
-The authoritative API contract is the `UserFiles` section of Agent Stack's `docs/openapi.yaml`. This repository is an example client, not a replacement for the OpenAPI schema.
+The authoritative API contract is Agent Stack's `docs/openapi.yaml`. This
+repository is an example client, not a replacement for the OpenAPI schema.
